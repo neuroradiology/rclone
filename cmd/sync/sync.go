@@ -2,15 +2,15 @@ package sync
 
 import (
 	"github.com/ncw/rclone/cmd"
-	"github.com/ncw/rclone/fs"
+	"github.com/ncw/rclone/fs/sync"
 	"github.com/spf13/cobra"
 )
 
 func init() {
-	cmd.Root.AddCommand(syncCmd)
+	cmd.Root.AddCommand(commandDefintion)
 }
 
-var syncCmd = &cobra.Command{
+var commandDefintion = &cobra.Command{
 	Use:   "sync source:path dest:path",
 	Short: `Make source and dest identical, modifying destination only.`,
 	Long: `
@@ -36,8 +36,8 @@ go there.
 	Run: func(command *cobra.Command, args []string) {
 		cmd.CheckArgs(2, 2, command, args)
 		fsrc, fdst := cmd.NewFsSrcDst(args)
-		cmd.Run(true, command, func() error {
-			return fs.Sync(fdst, fsrc)
+		cmd.Run(true, true, command, func() error {
+			return sync.Sync(fdst, fsrc)
 		})
 	},
 }

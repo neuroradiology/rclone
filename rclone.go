@@ -4,18 +4,11 @@
 package main
 
 import (
-	"fmt"
-	"os"
-
+	_ "github.com/ncw/rclone/backend/all" // import all backends
 	"github.com/ncw/rclone/cmd"
 	_ "github.com/ncw/rclone/cmd/all" // import all commands
-	_ "github.com/ncw/rclone/fs/all"  // import all fs
 )
 
 func main() {
-	if err := cmd.Root.Execute(); err != nil {
-		fmt.Println(err)
-		os.Exit(-1)
-	}
-	os.Exit(0)
+	cmd.Main()
 }

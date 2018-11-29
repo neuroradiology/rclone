@@ -6,22 +6,23 @@ import (
 
 	"github.com/ncw/rclone/cmd"
 	"github.com/ncw/rclone/fs"
+	"github.com/ncw/rclone/fs/operations"
 	"github.com/spf13/cobra"
 )
 
 func init() {
-	cmd.Root.AddCommand(memtestCmd)
+	cmd.Root.AddCommand(commandDefintion)
 }
 
-var memtestCmd = &cobra.Command{
+var commandDefintion = &cobra.Command{
 	Use:    "memtest remote:path",
 	Short:  `Load all the objects at remote:path and report memory stats.`,
 	Hidden: true,
 	Run: func(command *cobra.Command, args []string) {
 		cmd.CheckArgs(1, 1, command, args)
 		fsrc := cmd.NewFsSrc(args)
-		cmd.Run(false, command, func() error {
-			objects, _, err := fs.Count(fsrc)
+		cmd.Run(false, false, command, func() error {
+			objects, _, err := operations.Count(fsrc)
 			if err != nil {
 				return err
 			}
@@ -30,7 +31,7 @@ var memtestCmd = &cobra.Command{
 			runtime.GC()
 			runtime.ReadMemStats(&before)
 			var mu sync.Mutex
-			err = fs.ListFn(fsrc, func(o fs.Object) {
+			err = operations.ListFn(fsrc, func(o fs.Object) {
 				mu.Lock()
 				objs = append(objs, o)
 				mu.Unlock()
@@ -41,8 +42,8 @@ var memtestCmd = &cobra.Command{
 			runtime.GC()
 			runtime.ReadMemStats(&after)
 			usedMemory := after.Alloc - before.Alloc
-			fs.Log(nil, "%d objects took %d bytes, %.1f bytes/object", len(objs), usedMemory, float64(usedMemory)/float64(len(objs)))
-			fs.Log(nil, "System memory changed from %d to %d bytes a change of %d bytes", before.Sys, after.Sys, after.Sys-before.Sys)
+			fs.Logf(nil, "%d objects took %d bytes, %.1f bytes/object", len(objs), usedMemory, float64(usedMemory)/float64(len(objs)))
+			fs.Logf(nil, "System memory changed from %d to %d bytes a change of %d bytes", before.Sys, after.Sys, after.Sys-before.Sys)
 			return nil
 		})
 	},

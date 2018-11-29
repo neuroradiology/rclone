@@ -2,15 +2,15 @@ package authorize
 
 import (
 	"github.com/ncw/rclone/cmd"
-	"github.com/ncw/rclone/fs"
+	"github.com/ncw/rclone/fs/config"
 	"github.com/spf13/cobra"
 )
 
 func init() {
-	cmd.Root.AddCommand(authorizeCmd)
+	cmd.Root.AddCommand(commandDefintion)
 }
 
-var authorizeCmd = &cobra.Command{
+var commandDefintion = &cobra.Command{
 	Use:   "authorize",
 	Short: `Remote authorization.`,
 	Long: `
@@ -19,6 +19,6 @@ rclone from a machine with a browser - use as instructed by
 rclone config.`,
 	Run: func(command *cobra.Command, args []string) {
 		cmd.CheckArgs(1, 3, command, args)
-		fs.Authorize(args)
+		config.Authorize(args)
 	},
 }

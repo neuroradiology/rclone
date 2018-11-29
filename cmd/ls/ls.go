@@ -4,22 +4,36 @@ import (
 	"os"
 
 	"github.com/ncw/rclone/cmd"
-	"github.com/ncw/rclone/fs"
+	"github.com/ncw/rclone/cmd/ls/lshelp"
+	"github.com/ncw/rclone/fs/operations"
 	"github.com/spf13/cobra"
 )
 
 func init() {
-	cmd.Root.AddCommand(lsCmd)
+	cmd.Root.AddCommand(commandDefintion)
 }
 
-var lsCmd = &cobra.Command{
+var commandDefintion = &cobra.Command{
 	Use:   "ls remote:path",
-	Short: `List all the objects in the the path with size and path.`,
+	Short: `List the objects in the path with size and path.`,
+	Long: `
+Lists the objects in the source path to standard output in a human
+readable format with size and path. Recurses by default.
+
+Eg
+
+    $ rclone ls swift:bucket
+        60295 bevajer5jef
+        90613 canole
+        94467 diwogej7
+        37600 fubuwic
+
+` + lshelp.Help,
 	Run: func(command *cobra.Command, args []string) {
 		cmd.CheckArgs(1, 1, command, args)
 		fsrc := cmd.NewFsSrc(args)
-		cmd.Run(false, command, func() error {
-			return fs.List(fsrc, os.Stdout)
+		cmd.Run(false, false, command, func() error {
+			return operations.List(fsrc, os.Stdout)
 		})
 	},
 }

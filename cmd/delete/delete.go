@@ -2,15 +2,15 @@ package delete
 
 import (
 	"github.com/ncw/rclone/cmd"
-	"github.com/ncw/rclone/fs"
+	"github.com/ncw/rclone/fs/operations"
 	"github.com/spf13/cobra"
 )
 
 func init() {
-	cmd.Root.AddCommand(deleteCmd)
+	cmd.Root.AddCommand(commandDefintion)
 }
 
-var deleteCmd = &cobra.Command{
+var commandDefintion = &cobra.Command{
 	Use:   "delete remote:path",
 	Short: `Remove the contents of path.`,
 	Long: `
@@ -34,8 +34,8 @@ delete all files bigger than 100MBytes.
 	Run: func(command *cobra.Command, args []string) {
 		cmd.CheckArgs(1, 1, command, args)
 		fsrc := cmd.NewFsSrc(args)
-		cmd.Run(true, command, func() error {
-			return fs.Delete(fsrc)
+		cmd.Run(true, false, command, func() error {
+			return operations.Delete(fsrc)
 		})
 	},
 }

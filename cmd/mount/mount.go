@@ -5,111 +5,167 @@
 package mount
 
 import (
-	"bazil.org/fuse"
-	"github.com/ncw/rclone/cmd"
-	"github.com/ncw/rclone/fs"
-	"github.com/pkg/errors"
-	"github.com/spf13/cobra"
-)
+	"fmt"
+	"os"
+	"os/signal"
+	"syscall"
 
-// Globals
-var (
-	noModTime = false
-	debugFUSE = false
+	"bazil.org/fuse"
+	fusefs "bazil.org/fuse/fs"
+	"github.com/ncw/rclone/cmd/mountlib"
+	"github.com/ncw/rclone/fs"
+	"github.com/ncw/rclone/lib/atexit"
+	"github.com/ncw/rclone/vfs"
+	"github.com/ncw/rclone/vfs/vfsflags"
+	"github.com/okzk/sdnotify"
+	"github.com/pkg/errors"
 )
 
 func init() {
-	cmd.Root.AddCommand(mountCmd)
-	mountCmd.Flags().BoolVarP(&noModTime, "no-modtime", "", false, "Don't read the modification time (can speed things up).")
-	mountCmd.Flags().BoolVarP(&debugFUSE, "debug-fuse", "", false, "Debug the FUSE internals - needs -v.")
+	mountlib.NewMountCommand("mount", Mount)
 }
 
-var mountCmd = &cobra.Command{
-	Use:   "mount remote:path /path/to/mountpoint",
-	Short: `Mount the remote as a mountpoint. **EXPERIMENTAL**`,
-	Long: `
-rclone mount allows Linux, FreeBSD and macOS to mount any of Rclone's
-cloud storage systems as a file system with FUSE.
+// mountOptions configures the options from the command line flags
+func mountOptions(device string) (options []fuse.MountOption) {
+	options = []fuse.MountOption{
+		fuse.MaxReadahead(uint32(mountlib.MaxReadAhead)),
+		fuse.Subtype("rclone"),
+		fuse.FSName(device),
+		fuse.VolumeName(mountlib.VolumeName),
 
-This is **EXPERIMENTAL** - use with care.
+		// Options from benchmarking in the fuse module
+		//fuse.MaxReadahead(64 * 1024 * 1024),
+		//fuse.AsyncRead(), - FIXME this causes
+		// ReadFileHandle.Read error: read /home/files/ISOs/xubuntu-15.10-desktop-amd64.iso: bad file descriptor
+		// which is probably related to errors people are having
+		//fuse.WritebackCache(),
+	}
+	if mountlib.NoAppleDouble {
+		options = append(options, fuse.NoAppleDouble())
+	}
+	if mountlib.NoAppleXattr {
+		options = append(options, fuse.NoAppleXattr())
+	}
+	if mountlib.AllowNonEmpty {
+		options = append(options, fuse.AllowNonEmptyMount())
+	}
+	if mountlib.AllowOther {
+		options = append(options, fuse.AllowOther())
+	}
+	if mountlib.AllowRoot {
+		options = append(options, fuse.AllowRoot())
+	}
+	if mountlib.DefaultPermissions {
+		options = append(options, fuse.DefaultPermissions())
+	}
+	if vfsflags.Opt.ReadOnly {
+		options = append(options, fuse.ReadOnly())
+	}
+	if mountlib.WritebackCache {
+		options = append(options, fuse.WritebackCache())
+	}
+	if mountlib.DaemonTimeout != 0 {
+		options = append(options, fuse.DaemonTimeout(fmt.Sprint(int(mountlib.DaemonTimeout.Seconds()))))
+	}
+	if len(mountlib.ExtraOptions) > 0 {
+		fs.Errorf(nil, "-o/--option not supported with this FUSE backend")
+	}
+	if len(mountlib.ExtraOptions) > 0 {
+		fs.Errorf(nil, "--fuse-flag not supported with this FUSE backend")
+	}
+	return options
+}
 
-First set up your remote using ` + "`rclone config`" + `.  Check it works with ` + "`rclone ls`" + ` etc.
+// mount the file system
+//
+// The mount point will be ready when this returns.
+//
+// returns an error, and an error channel for the serve process to
+// report an error when fusermount is called.
+func mount(f fs.Fs, mountpoint string) (*vfs.VFS, <-chan error, func() error, error) {
+	fs.Debugf(f, "Mounting on %q", mountpoint)
+	c, err := fuse.Mount(mountpoint, mountOptions(f.Name()+":"+f.Root())...)
+	if err != nil {
+		return nil, nil, nil, err
+	}
 
-Start the mount like this
+	filesys := NewFS(f)
+	server := fusefs.New(c, nil)
 
-    rclone mount remote:path/to/files /path/to/local/mount &
+	// Serve the mount point in the background returning error to errChan
+	errChan := make(chan error, 1)
+	go func() {
+		err := server.Serve(filesys)
+		closeErr := c.Close()
+		if err == nil {
+			err = closeErr
+		}
+		errChan <- err
+	}()
 
-Stop the mount with
+	// check if the mount process has an error to report
+	<-c.Ready
+	if err := c.MountError; err != nil {
+		return nil, nil, nil, err
+	}
 
-    fusermount -u /path/to/local/mount
+	unmount := func() error {
+		// Shutdown the VFS
+		filesys.VFS.Shutdown()
+		return fuse.Unmount(mountpoint)
+	}
 
-Or with OS X
-
-    umount -u /path/to/local/mount
-
-### Limitations ###
-
-This can only read files seqentially, or write files sequentially.  It
-can't read and write or seek in files.
-
-rclonefs inherits rclone's directory handling.  In rclone's world
-directories don't really exist.  This means that empty directories
-will have a tendency to disappear once they fall out of the directory
-cache.
-
-The bucket based FSes (eg swift, s3, google compute storage, b2) won't
-work from the root - you will need to specify a bucket, or a path
-within the bucket.  So ` + "`swift:`" + ` won't work whereas ` + "`swift:bucket`" + ` will
-as will ` + "`swift:bucket/path`" + `.
-
-Only supported on Linux, FreeBSD and OS X at the moment.
-
-### rclone mount vs rclone sync/copy ##
-
-File systems expect things to be 100% reliable, whereas cloud storage
-systems are a long way from 100% reliable. The rclone sync/copy
-commands cope with this with lots of retries.  However rclone mount
-can't use retries in the same way without making local copies of the
-uploads.  This might happen in the future, but for the moment rclone
-mount won't do that, so will be less reliable than the rclone command.
-
-### Bugs ###
-
-  * All the remotes should work for read, but some may not for write
-    * those which need to know the size in advance won't - eg B2
-    * maybe should pass in size as -1 to mean work it out
-
-### TODO ###
-
-  * Check hashes on upload/download
-  * Preserve timestamps
-  * Move directories
-`,
-	RunE: func(command *cobra.Command, args []string) error {
-		cmd.CheckArgs(2, 2, command, args)
-		fdst := cmd.NewFsDst(args)
-		return Mount(fdst, args[1])
-	},
+	return filesys.VFS, errChan, unmount, nil
 }
 
 // Mount mounts the remote at mountpoint.
 //
 // If noModTime is set then it
 func Mount(f fs.Fs, mountpoint string) error {
-	if debugFUSE {
+	if mountlib.DebugFUSE {
 		fuse.Debug = func(msg interface{}) {
-			fs.Debug("fuse", "%v", msg)
+			fs.Debugf("fuse", "%v", msg)
 		}
 	}
 
 	// Mount it
-	errChan, err := mount(f, mountpoint)
+	FS, errChan, unmount, err := mount(f, mountpoint)
 	if err != nil {
 		return errors.Wrap(err, "failed to mount FUSE fs")
 	}
 
-	// Wait for umount
-	err = <-errChan
+	sigInt := make(chan os.Signal, 1)
+	signal.Notify(sigInt, syscall.SIGINT, syscall.SIGTERM)
+	sigHup := make(chan os.Signal, 1)
+	signal.Notify(sigHup, syscall.SIGHUP)
+	atexit.IgnoreSignals()
+
+	if err := sdnotify.Ready(); err != nil && err != sdnotify.ErrSdNotifyNoSocket {
+		return errors.Wrap(err, "failed to notify systemd")
+	}
+
+waitloop:
+	for {
+		select {
+		// umount triggered outside the app
+		case err = <-errChan:
+			break waitloop
+		// Program abort: umount
+		case <-sigInt:
+			err = unmount()
+			break waitloop
+		// user sent SIGHUP to clear the cache
+		case <-sigHup:
+			root, err := FS.Root()
+			if err != nil {
+				fs.Errorf(f, "Error reading root: %v", err)
+			} else {
+				root.ForgetAll()
+			}
+		}
+	}
+
+	_ = sdnotify.Stopping()
 	if err != nil {
 		return errors.Wrap(err, "failed to umount FUSE fs")
 	}

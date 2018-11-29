@@ -2,15 +2,16 @@ package copy
 
 import (
 	"github.com/ncw/rclone/cmd"
-	"github.com/ncw/rclone/fs"
+	"github.com/ncw/rclone/fs/operations"
+	"github.com/ncw/rclone/fs/sync"
 	"github.com/spf13/cobra"
 )
 
 func init() {
-	cmd.Root.AddCommand(copyCmd)
+	cmd.Root.AddCommand(commandDefintion)
 }
 
-var copyCmd = &cobra.Command{
+var commandDefintion = &cobra.Command{
 	Use:   "copy source:path dest:path",
 	Short: `Copy files from source to dest, skipping already copied`,
 	Long: `
@@ -45,19 +46,19 @@ Not to
     destpath/sourcepath/one.txt
     destpath/sourcepath/two.txt
 
-If you are familiar with ` + "`" + `rsync` + "`" + `, rclone always works as if you had
+If you are familiar with ` + "`rsync`" + `, rclone always works as if you had
 written a trailing / - meaning "copy the contents of this directory".
 This applies to all commands and whether you are talking about the
 source or destination.
-
-See the ` + "`" + `--no-traverse` + "`" + ` option for controlling whether rclone lists
-the destination directory or not.
 `,
 	Run: func(command *cobra.Command, args []string) {
 		cmd.CheckArgs(2, 2, command, args)
-		fsrc, fdst := cmd.NewFsSrcDst(args)
-		cmd.Run(true, command, func() error {
-			return fs.CopyDir(fdst, fsrc)
+		fsrc, srcFileName, fdst := cmd.NewFsSrcFileDst(args)
+		cmd.Run(true, true, command, func() error {
+			if srcFileName == "" {
+				return sync.CopyDir(fdst, fsrc)
+			}
+			return operations.CopyFile(fdst, fsrc, srcFileName, srcFileName)
 		})
 	},
 }

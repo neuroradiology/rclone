@@ -1,6 +1,7 @@
 *~
 _junk/
 rclone
-rclonetest/rclonetest
 build
 docs/public
+rclone.iml
+.idea

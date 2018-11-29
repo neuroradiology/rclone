@@ -4,15 +4,15 @@ import (
 	"os"
 
 	"github.com/ncw/rclone/cmd"
-	"github.com/ncw/rclone/fs"
+	"github.com/ncw/rclone/fs/operations"
 	"github.com/spf13/cobra"
 )
 
 func init() {
-	cmd.Root.AddCommand(sha1sumCmd)
+	cmd.Root.AddCommand(commandDefintion)
 }
 
-var sha1sumCmd = &cobra.Command{
+var commandDefintion = &cobra.Command{
 	Use:   "sha1sum remote:path",
 	Short: `Produces an sha1sum file for all the objects in the path.`,
 	Long: `
@@ -22,8 +22,8 @@ is in the same format as the standard sha1sum tool produces.
 	Run: func(command *cobra.Command, args []string) {
 		cmd.CheckArgs(1, 1, command, args)
 		fsrc := cmd.NewFsSrc(args)
-		cmd.Run(false, command, func() error {
-			return fs.Sha1sum(fsrc, os.Stdout)
+		cmd.Run(false, false, command, func() error {
+			return operations.Sha1sum(fsrc, os.Stdout)
 		})
 	},
 }
